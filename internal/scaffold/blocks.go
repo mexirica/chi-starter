@@ -1,4 +1,4 @@
-package blueprint
+package scaffold
 
 type Block struct {
 	ID          string

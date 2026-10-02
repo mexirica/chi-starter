@@ -1,4 +1,4 @@
-package blueprint
+package scaffold
 
 const dockerfileTemplate = `
 FROM golang:1.24-alpine AS builder

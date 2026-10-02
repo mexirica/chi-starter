@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mexirica/chi-starter/internal/blueprint"
+	"github.com/mexirica/chi-starter/internal/scaffold"
 )
 
 func Run(args []string, stdout io.Writer, stderr io.Writer) (handled bool, err error) {
@@ -78,7 +78,7 @@ func runCreate(args []string, stdout io.Writer, stderr io.Writer) error {
 	blocks["observability"] = blocks["observability"] || *enableObservability
 	blocks["docker"] = blocks["docker"] || *enableDocker
 
-	result, err := blueprint.Generate(blueprint.Options{
+	result, err := scaffold.Generate(scaffold.Options{
 		ProjectName: normalizedName,
 		ModulePath:  module,
 		OutputDir:   output,
@@ -111,7 +111,7 @@ func parseBlocks(raw string) (map[string]bool, error) {
 	}
 
 	available := map[string]bool{}
-	for _, block := range blueprint.OptionalBlocks() {
+	for _, block := range scaffold.OptionalBlocks() {
 		available[block.ID] = true
 	}
 
@@ -131,7 +131,7 @@ func parseBlocks(raw string) (map[string]bool, error) {
 
 func selectedBlocks(blocks map[string]bool) []string {
 	selected := []string{"core"}
-	for _, block := range blueprint.OptionalBlocks() {
+	for _, block := range scaffold.OptionalBlocks() {
 		if blocks[block.ID] {
 			selected = append(selected, block.ID)
 		}

@@ -1,4 +1,4 @@
-package blueprint
+package scaffold
 
 const gitignoreTemplate = `
 # Binaries and build output

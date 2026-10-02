@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mexirica/chi-starter/internal/blueprint"
+	"github.com/mexirica/chi-starter/internal/scaffold"
 )
 
 type step int
@@ -24,7 +24,7 @@ const (
 )
 
 type generatedMsg struct {
-	result    blueprint.Result
+	result    scaffold.Result
 	outputDir string
 	err       error
 }
@@ -34,13 +34,13 @@ type model struct {
 	nameInput   textinput.Model
 	moduleInput textinput.Model
 	outputInput textinput.Model
-	blocks      []blueprint.Block
+	blocks      []scaffold.Block
 	selected    map[string]bool
 	cursor      int
 	width       int
 	height      int
 	generating  bool
-	result      *blueprint.Result
+	result      *scaffold.Result
 	outputDir   string
 	err         string
 }
@@ -74,7 +74,7 @@ func New() tea.Model {
 	outputInput.Prompt = "> "
 
 	selected := map[string]bool{}
-	for _, block := range blueprint.OptionalBlocks() {
+	for _, block := range scaffold.OptionalBlocks() {
 		selected[block.ID] = false
 	}
 
@@ -83,7 +83,7 @@ func New() tea.Model {
 		nameInput:   nameInput,
 		moduleInput: moduleInput,
 		outputInput: outputInput,
-		blocks:      blueprint.OptionalBlocks(),
+		blocks:      scaffold.OptionalBlocks(),
 		selected:    selected,
 	}
 }
@@ -334,7 +334,7 @@ func (m model) updateResult(message tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) generate() tea.Cmd {
-	options := blueprint.Options{
+	options := scaffold.Options{
 		ProjectName: m.nameInput.Value(),
 		ModulePath:  m.moduleInput.Value(),
 		OutputDir:   m.outputInput.Value(),
@@ -342,7 +342,7 @@ func (m model) generate() tea.Cmd {
 	}
 
 	return func() tea.Msg {
-		result, err := blueprint.Generate(options)
+		result, err := scaffold.Generate(options)
 		return generatedMsg{result: result, outputDir: options.OutputDir, err: err}
 	}
 }
