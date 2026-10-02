@@ -5,7 +5,7 @@
 <h1 align="center">Chi Template</h1>
 
 <p align="center">
-  Production-first Go scaffolding for Chi APIs.
+  Production-first Go template for Chi APIs.
 </p>
 
 <p align="center">
