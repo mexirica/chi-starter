@@ -5,8 +5,8 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/mexirica/chi-template/internal/cli"
-	"github.com/mexirica/chi-template/internal/tui"
+	"github.com/mexirica/chi-starter/internal/cli"
+	"github.com/mexirica/chi-starter/internal/tui"
 )
 
 func main() {

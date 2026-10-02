@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/mexirica/chi-template/internal/blueprint"
+	"github.com/mexirica/chi-starter/internal/blueprint"
 )
 
 func Run(args []string, stdout io.Writer, stderr io.Writer) (handled bool, err error) {
@@ -149,11 +149,11 @@ func sanitizeName(value string) string {
 }
 
 func printRootUsage(out io.Writer) {
-	fmt.Fprintln(out, "Chi Template")
+	fmt.Fprintln(out, "Chi Starter")
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Usage:")
-	fmt.Fprintln(out, "  chi-template              # interactive TUI")
-	fmt.Fprintln(out, "  chi-template create [flags]")
+	fmt.Fprintln(out, "  chi-starter               # interactive TUI")
+	fmt.Fprintln(out, "  chi-starter create [flags]")
 	fmt.Fprintln(out)
 	printCreateUsage(out)
 }

@@ -4,8 +4,8 @@ help:
 	@echo "Usage: make [target]"
 	@echo ""
 	@echo "Targets:"
-	@echo "  run    Run the Chi Template app"
-	@echo "  build  Build the Chi Template binary"
+	@echo "  run    Run the Chi Starter app"
+	@echo "  build  Build the Chi Starter binary"
 	@echo "  test   Run the test suite"
 	@echo "  tidy   Sync Go module files"
 
@@ -14,7 +14,7 @@ run:
 
 build:
 	@mkdir -p bin
-	@go build -o bin/chi-template ./cmd
+	@go build -o bin/chi-starter ./cmd
 
 test:
 	@go test -v ./...

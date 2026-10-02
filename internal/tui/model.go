@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/mexirica/chi-template/internal/blueprint"
+	"github.com/mexirica/chi-starter/internal/blueprint"
 )
 
 type step int
@@ -141,7 +141,7 @@ func (m model) Update(message tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) View() string {
 	steps := []string{"Project", "Module", "Output", "Blocks", "Review", "Done"}
 	header := strings.Join([]string{
-		headlineStyle.Render("Chi Template"),
+		headlineStyle.Render("Chi Starter"),
 		subtitleStyle.Render("Generate a clean, scalable Go backend baseline."),
 		renderStepper(steps, m.step),
 	}, "\n")

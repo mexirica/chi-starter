@@ -1,4 +1,4 @@
-module github.com/mexirica/chi-template
+module github.com/mexirica/chi-starter
 
 go 1.27.1
 

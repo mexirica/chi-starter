@@ -1,11 +1,11 @@
 <p align="center">
-  <img src="assets/template.png" alt="Chi Template preview" width="150" />
+  <img src="assets/template.png" alt="Chi Starter preview" width="150" />
 </p>
 
-<h1 align="center">Chi Template</h1>
+<h1 align="center">Chi Starter</h1>
 
 <p align="center">
-  Production-first Go template for Chi APIs.
+  Production-first Go starter for Chi APIs.
 </p>
 
 <p align="center">
@@ -14,7 +14,9 @@
   <img src="https://img.shields.io/badge/interface-TUI%20%2B%20CLI-7c3aed" alt="Interface" />
 </p>
 
-Chi Template helps you bootstrap clean backend services fast, with sensible defaults, optional infrastructure blocks, and both interactive and scripted workflows.
+Chi Starter helps you bootstrap clean backend services fast, with sensible defaults, optional infrastructure blocks, and both interactive and scripted workflows.
+
+It generates a production-ready Go + Chi backend scaffold with an interactive TUI or a CLI workflow for automation in local development and CI pipelines.
 
 Built with Bubble Tea, Lip Gloss and Bubbles.
 
@@ -32,15 +34,15 @@ Built with Bubble Tea, Lip Gloss and Bubbles.
 ### Go install
 
 ```bash
-go install github.com/mexirica/chi-template@latest
+go install github.com/mexirica/chi-starter@latest
 ```
 
 ### Build from source
 
 ```bash
-git clone https://github.com/mexirica/chi-template.git
-cd chi-template
-go build -o chi-template ./cmd
+git clone https://github.com/mexirica/chi-starter.git
+cd chi-starter
+go build -o chi-starter ./cmd
 ```
 
 ## Usage
@@ -67,8 +69,8 @@ go run ./cmd create --name my-service --blocks postgres,redis,observability,dock
 
 | Command | Description |
 |---|---|
-| chi-template | Open interactive TUI |
-| chi-template create [flags] | Generate project using flags |
+| chi-starter | Open interactive TUI |
+| chi-starter create [flags] | Generate project using flags |
 
 ## Create Flags
 

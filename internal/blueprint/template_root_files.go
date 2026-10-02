@@ -74,7 +74,7 @@ tmp_dir = "tmp"
 const readmeTemplate = `
 # {{ .ProjectName }}
 
-Generated with Chi Template.
+Generated with Chi Starter.
 
 Production-first baseline for Go + Chi services.
 
