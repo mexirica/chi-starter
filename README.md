@@ -34,7 +34,7 @@ Built with Bubble Tea, Lip Gloss and Bubbles.
 ### Go install
 
 ```bash
-go install github.com/mexirica/chi-starter@latest
+go install github.com/mexirica/chi-starter/cmd@latest
 ```
 
 ### Build from source
