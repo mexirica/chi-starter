@@ -120,11 +120,7 @@ func New(ctx context.Context, cfg config.Config) (*App, error) {
 	checks["postgres"] = application.dbConn.Ping
 {{- end }}
 {{- if .HasRedis }}
-	redisClient, err := cache.Open(ctx, cfg.RedisAddr)
-	if err != nil {
-		_ = application.closeResources(context.Background())
-		return nil, fmt.Errorf("connect redis: %w", err)
-	}
+	redisClient := cache.New(cfg.RedisAddr)
 	application.redisClient = redisClient
 	checks["redis"] = func(ctx context.Context) error {
 		return application.redisClient.Ping(ctx).Err()
@@ -212,6 +208,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+{{- if .HasObservability }}
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+{{- end }}
 )
 
 type Probe func(context.Context) error
@@ -234,10 +233,13 @@ func NewRouter(options RouterOptions) http.Handler {
 		requestTimeout = 30 * time.Second
 	}
 
-	health := &healthHandler{checks: cloneChecks(options.Checks)}
-	metrics := newHTTPMetrics(options.EnableMetrics)
+	health := &healthHandler{checks: cloneChecks(options.Checks), logger: logger}
+	metrics, metricsEndpoint := newHTTPMetrics(options.EnableMetrics)
 
 	router := chi.NewRouter()
+{{- if .HasObservability }}
+	router.Use(otelhttp.NewMiddleware("{{ .ProjectName }}"))
+{{- end }}
 	router.Use(middleware.RequestID)
 	router.Use(middleware.RealIP)
 	router.Use(middleware.Recoverer)
@@ -251,8 +253,8 @@ func NewRouter(options RouterOptions) http.Handler {
 		versioned.Get("/readyz", health.ready)
 	})
 
-	if handler := metricsHandler(options.EnableMetrics); handler != nil {
-		router.Handle("/metrics", handler)
+	if metricsEndpoint != nil {
+		router.Handle("/metrics", metricsEndpoint)
 	}
 
 	return router
@@ -276,6 +278,7 @@ const healthTemplate = `
 package server
 
 import (
+	"log/slog"
 	"net/http"
 	"sort"
 
@@ -284,6 +287,7 @@ import (
 
 type healthHandler struct {
 	checks map[string]Probe
+	logger *slog.Logger
 }
 
 func (handler *healthHandler) live(writer http.ResponseWriter, _ *http.Request) {
@@ -299,7 +303,8 @@ func (handler *healthHandler) ready(writer http.ResponseWriter, request *http.Re
 		probe := handler.checks[name]
 		if err := probe(request.Context()); err != nil {
 			degraded = true
-			result[name] = err.Error()
+			handler.logger.Error("readiness check failed", "dependency", name, "error", err)
+			result[name] = "unavailable"
 			continue
 		}
 
@@ -417,7 +422,6 @@ import (
 	"strconv"
 
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 {{- end }}
 )
@@ -430,47 +434,43 @@ type noopHTTPMetrics struct{}
 
 func (noopHTTPMetrics) Observe(string, string, int, time.Duration) {}
 
-func newHTTPMetrics(enabled bool) httpMetrics {
+func newHTTPMetrics(enabled bool) (httpMetrics, http.Handler) {
 	if !enabled {
-		return noopHTTPMetrics{}
+		return noopHTTPMetrics{}, nil
 	}
 {{- if .HasObservability }}
-	return promHTTPMetrics{}
-{{- else }}
-	return noopHTTPMetrics{}
-{{- end }}
-}
-
-func metricsHandler(enabled bool) http.Handler {
-	if !enabled {
-		return nil
-	}
-{{- if .HasObservability }}
-	return promhttp.Handler()
-{{- else }}
-	return nil
-{{- end }}
-}
-
-{{- if .HasObservability }}
-var (
-	httpRequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	registry := prometheus.NewRegistry()
+	requestsTotal := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "http_requests_total",
 		Help: "Total number of handled HTTP requests.",
 	}, []string{"method", "route", "status"})
-	httpRequestDurationSeconds = promauto.NewHistogramVec(prometheus.HistogramOpts{
+	requestDurationSeconds := prometheus.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "http_request_duration_seconds",
 		Help:    "Latency distribution of HTTP requests.",
 		Buckets: prometheus.DefBuckets,
 	}, []string{"method", "route", "status"})
-)
+	registry.MustRegister(requestsTotal, requestDurationSeconds)
 
-type promHTTPMetrics struct{}
+	metrics := promHTTPMetrics{
+		requestsTotal:          requestsTotal,
+		requestDurationSeconds: requestDurationSeconds,
+	}
+	return metrics, promhttp.HandlerFor(registry, promhttp.HandlerOpts{})
+{{- else }}
+	return noopHTTPMetrics{}, nil
+{{- end }}
+}
 
-func (promHTTPMetrics) Observe(method string, route string, statusCode int, duration time.Duration) {
+{{- if .HasObservability }}
+type promHTTPMetrics struct {
+	requestsTotal          *prometheus.CounterVec
+	requestDurationSeconds *prometheus.HistogramVec
+}
+
+func (metrics promHTTPMetrics) Observe(method string, route string, statusCode int, duration time.Duration) {
 	status := strconv.Itoa(statusCode)
-	httpRequestsTotal.WithLabelValues(method, route, status).Inc()
-	httpRequestDurationSeconds.WithLabelValues(method, route, status).Observe(duration.Seconds())
+	metrics.requestsTotal.WithLabelValues(method, route, status).Inc()
+	metrics.requestDurationSeconds.WithLabelValues(method, route, status).Observe(duration.Seconds())
 }
 {{- end }}
 `
@@ -483,6 +483,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 )
 
@@ -544,7 +546,54 @@ func TestNewRouterReadyzDegraded(t *testing.T) {
 	if recorder.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected status %d, got %d", http.StatusServiceUnavailable, recorder.Code)
 	}
+	if strings.Contains(recorder.Body.String(), "db down") {
+		t.Fatalf("expected readiness response to hide dependency error, got %s", recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), ` + "`\"database\":\"unavailable\"`" + `) {
+		t.Fatalf("expected sanitized dependency status, got %s", recorder.Body.String())
+	}
 }
+
+func TestNewRouterHandlesConcurrentRequests(t *testing.T) {
+	t.Parallel()
+
+	router := NewRouter(RouterOptions{})
+	statuses := make(chan int, 32)
+	var group sync.WaitGroup
+	for range 32 {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			request := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+			statuses <- recorder.Code
+		}()
+	}
+
+	group.Wait()
+	close(statuses)
+	for status := range statuses {
+		if status != http.StatusOK {
+			t.Fatalf("expected status %d, got %d", http.StatusOK, status)
+		}
+	}
+}
+
+{{- if .HasObservability }}
+func TestNewRouterUsesIsolatedMetricsRegistries(t *testing.T) {
+	t.Parallel()
+
+	for range 2 {
+		request := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+		recorder := httptest.NewRecorder()
+		NewRouter(RouterOptions{EnableMetrics: true}).ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("expected metrics status %d, got %d", http.StatusOK, recorder.Code)
+		}
+	}
+}
+{{- end }}
 `
 
 const serverTemplate = `

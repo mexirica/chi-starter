@@ -140,6 +140,11 @@ func renderFiles(options Options) (map[string]string, error) {
 		if err != nil {
 			return nil, err
 		}
+
+		files[filepath.ToSlash("internal/middleware/cache_test.go")], err = executeTemplate(cacheMiddlewareTestTemplate, data)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	if data.HasObservability {
@@ -229,6 +234,7 @@ func newTemplateData(options Options) templateData {
 		requirements = append(
 			requirements,
 			"github.com/prometheus/client_golang v1.20.3",
+			"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.62.0",
 			"go.opentelemetry.io/otel v1.37.0",
 			"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp v1.37.0",
 			"go.opentelemetry.io/otel/sdk v1.37.0",

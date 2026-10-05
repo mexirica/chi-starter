@@ -1,7 +1,7 @@
 package scaffold
 
 const dockerfileTemplate = `
-FROM golang:1.24-alpine AS builder
+FROM golang:{{ .GoVersion }}-alpine AS builder
 
 WORKDIR /src
 RUN apk add --no-cache ca-certificates tzdata
@@ -40,7 +40,7 @@ services:
       timeout: 3s
       retries: 3
       start_period: 10s
-{{- if or .HasPostgres .HasRedis .HasObservability }}
+{{- if or .HasPostgres .HasRedis }}
     depends_on:
 {{- if .HasPostgres }}
       postgres:
@@ -49,18 +49,6 @@ services:
 {{- if .HasRedis }}
       redis:
         condition: service_healthy
-{{- end }}
-{{- if .HasObservability }}
-      otel-collector:
-        condition: service_started
-      prometheus:
-        condition: service_started
-      loki:
-        condition: service_started
-      tempo:
-        condition: service_started
-      grafana:
-        condition: service_started
 {{- end }}
 {{- end }}
 

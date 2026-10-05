@@ -50,23 +50,13 @@ const (
 	DefaultTimeout = 2 * time.Second
 )
 
-func Open(ctx context.Context, address string) (*redis.Client, error) {
-	client := redis.NewClient(&redis.Options{
+func New(address string) *redis.Client {
+	return redis.NewClient(&redis.Options{
 		Addr:         address,
 		DialTimeout:  DefaultTimeout,
 		ReadTimeout:  DefaultTimeout,
 		WriteTimeout: DefaultTimeout,
 	})
-
-	pingCtx, cancel := context.WithTimeout(ctx, DefaultTimeout)
-	defer cancel()
-
-	if err := client.Ping(pingCtx).Err(); err != nil {
-		_ = client.Close()
-		return nil, fmt.Errorf("ping redis: %w", err)
-	}
-
-	return client, nil
 }
 
 func Set(ctx context.Context, client *redis.Client, key string, value string, ttl time.Duration) error {
@@ -103,6 +93,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -119,7 +110,7 @@ func Cache(ttl time.Duration, client *redis.Client) func(http.Handler) http.Hand
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-			if client == nil || request.Method != http.MethodGet {
+			if client == nil || !isCacheableRequest(request) {
 				next.ServeHTTP(writer, request)
 				return
 			}
@@ -136,9 +127,10 @@ func Cache(ttl time.Duration, client *redis.Client) func(http.Handler) http.Hand
 
 			recorder := newResponseRecorder(writer)
 			next.ServeHTTP(recorder, request)
+			recorder.Header().Set("X-Cache", "miss")
+			recorder.flush()
 
-			writer.Header().Set("X-Cache", "miss")
-			if recorder.statusCode != http.StatusOK || recorder.body.Len() == 0 {
+			if recorder.statusCode != http.StatusOK || recorder.body.Len() == 0 || !isCacheableResponse(recorder.Header()) {
 				return
 			}
 
@@ -152,33 +144,139 @@ func Cache(ttl time.Duration, client *redis.Client) func(http.Handler) http.Hand
 	}
 }
 
+func isCacheableRequest(request *http.Request) bool {
+	return request.Method == http.MethodGet &&
+		request.Header.Get("Authorization") == "" &&
+		request.Header.Get("Cookie") == ""
+}
+
+func isCacheableResponse(header http.Header) bool {
+	if header.Get("Set-Cookie") != "" || !strings.HasPrefix(header.Get("Content-Type"), "application/json") {
+		return false
+	}
+
+	public := false
+	for _, directive := range strings.Split(strings.ToLower(header.Get("Cache-Control")), ",") {
+		switch strings.TrimSpace(directive) {
+		case "public":
+			public = true
+		case "private", "no-store":
+			return false
+		}
+	}
+
+	return public
+}
+
 func buildCacheKey(request *http.Request) string {
-	checksum := sha256.Sum256([]byte(request.Method + ":" + request.URL.RequestURI()))
+	value := request.Method + ":" + request.URL.RequestURI() + ":" + request.Header.Get("Accept") + ":" + request.Header.Get("Accept-Encoding")
+	checksum := sha256.Sum256([]byte(value))
 	return "http-cache:" + hex.EncodeToString(checksum[:])
 }
 
 type responseRecorder struct {
 	writer     http.ResponseWriter
+	header     http.Header
 	body       bytes.Buffer
 	statusCode int
+	wroteHeader bool
 }
 
 func newResponseRecorder(writer http.ResponseWriter) *responseRecorder {
-	return &responseRecorder{writer: writer, statusCode: http.StatusOK}
+	return &responseRecorder{writer: writer, header: make(http.Header), statusCode: http.StatusOK}
 }
 
 func (recorder *responseRecorder) Header() http.Header {
-	return recorder.writer.Header()
+	return recorder.header
 }
 
 func (recorder *responseRecorder) WriteHeader(statusCode int) {
+	if recorder.wroteHeader {
+		return
+	}
+
 	recorder.statusCode = statusCode
-	recorder.writer.WriteHeader(statusCode)
+	recorder.wroteHeader = true
 }
 
 func (recorder *responseRecorder) Write(payload []byte) (int, error) {
-	recorder.body.Write(payload)
-	return recorder.writer.Write(payload)
+	if !recorder.wroteHeader {
+		recorder.WriteHeader(http.StatusOK)
+	}
+
+	return recorder.body.Write(payload)
+}
+
+func (recorder *responseRecorder) flush() {
+	for key, values := range recorder.header {
+		recorder.writer.Header()[key] = append([]string(nil), values...)
+	}
+	recorder.writer.WriteHeader(recorder.statusCode)
+	_, _ = recorder.writer.Write(recorder.body.Bytes())
+}
+`
+
+const cacheMiddlewareTestTemplate = `
+package middleware
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+)
+
+func TestIsCacheableRequestRejectsCredentials(t *testing.T) {
+	t.Parallel()
+
+	for _, header := range []string{"Authorization", "Cookie"} {
+		request := httptest.NewRequest(http.MethodGet, "/resource", nil)
+		request.Header.Set(header, "sensitive")
+		if isCacheableRequest(request) {
+			t.Fatalf("expected request with %s not to be cacheable", header)
+		}
+	}
+}
+
+func TestIsCacheableResponseRequiresExplicitPublicJSON(t *testing.T) {
+	t.Parallel()
+
+	header := make(http.Header)
+	header.Set("Content-Type", "application/json; charset=utf-8")
+	if isCacheableResponse(header) {
+		t.Fatal("expected response without public directive not to be cacheable")
+	}
+
+	header.Set("Cache-Control", "public, max-age=60")
+	if !isCacheableResponse(header) {
+		t.Fatal("expected explicitly public JSON response to be cacheable")
+	}
+
+	header.Set("Set-Cookie", "session=secret")
+	if isCacheableResponse(header) {
+		t.Fatal("expected response with Set-Cookie not to be cacheable")
+	}
+}
+
+func TestResponseRecorderBuffersHeadersAndBody(t *testing.T) {
+	t.Parallel()
+
+	underlying := httptest.NewRecorder()
+	recorder := newResponseRecorder(underlying)
+	recorder.Header().Set("Content-Type", "application/json")
+	_, _ = recorder.Write([]byte("payload"))
+
+	if underlying.Body.Len() != 0 {
+		t.Fatal("expected response to remain buffered before flush")
+	}
+
+	recorder.Header().Set("X-Cache", "miss")
+	recorder.flush()
+	if underlying.Header().Get("X-Cache") != "miss" {
+		t.Fatal("expected X-Cache header to be flushed before the response")
+	}
+	if underlying.Body.String() != "payload" {
+		t.Fatalf("expected buffered payload, got %q", underlying.Body.String())
+	}
 }
 `
 

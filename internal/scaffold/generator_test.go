@@ -202,6 +202,12 @@ func TestGenerateAllBlocks(t *testing.T) {
 	if strings.Contains(compose, "\t") {
 		t.Fatal("expected docker compose to use spaces instead of tabs")
 	}
+	appService := strings.SplitN(compose, "\n  postgres:\n", 2)[0]
+	for _, dependency := range []string{"otel-collector:", "prometheus:", "loki:", "tempo:", "grafana:"} {
+		if strings.Contains(appService, dependency) {
+			t.Fatalf("expected app service not to depend on observability service %q", dependency)
+		}
+	}
 
 	for _, path := range []string{
 		".air.toml",
@@ -209,6 +215,7 @@ func TestGenerateAllBlocks(t *testing.T) {
 		"internal/helpers/helpers.go",
 		"internal/logging/logging.go",
 		"internal/middleware/cache.go",
+		"internal/middleware/cache_test.go",
 		"internal/database/postgres.go",
 		"internal/cache/redis.go",
 		"internal/o11y/o11y.go",
@@ -260,10 +267,22 @@ func TestGenerateAllBlocks(t *testing.T) {
 	}
 
 	cacheMiddleware := string(cacheMiddlewareBytes)
-	for _, expected := range []string{"func Cache(", "request.Method != http.MethodGet", "X-Cache", "cache.DefaultTTL", "cacheWriteTimeout", "go func()"} {
+	for _, expected := range []string{"func Cache(", "isCacheableRequest(request)", "isCacheableResponse(recorder.Header())", "Authorization", "Cache-Control", "recorder.flush()", "X-Cache", "cache.DefaultTTL", "cacheWriteTimeout", "go func()"} {
 		if !strings.Contains(cacheMiddleware, expected) {
 			t.Fatalf("expected cache middleware to contain %q", expected)
 		}
+	}
+
+	appBytes, err := os.ReadFile(filepath.Join(outputDir, "internal", "app", "app.go"))
+	if err != nil {
+		t.Fatalf("read app: %v", err)
+	}
+	appFile := string(appBytes)
+	if !strings.Contains(appFile, "redisClient := cache.New(cfg.RedisAddr)") {
+		t.Fatal("expected Redis initialization not to perform startup I/O")
+	}
+	if strings.Contains(appFile, "connect redis") {
+		t.Fatal("expected Redis failure to degrade readiness instead of failing startup")
 	}
 
 	metricsBytes, err := os.ReadFile(filepath.Join(outputDir, "internal", "server", "metrics.go"))
@@ -272,10 +291,21 @@ func TestGenerateAllBlocks(t *testing.T) {
 	}
 
 	metrics := string(metricsBytes)
-	for _, expected := range []string{"http_requests_total", "http_request_duration_seconds", "promhttp.Handler()"} {
+	for _, expected := range []string{"http_requests_total", "http_request_duration_seconds", "prometheus.NewRegistry()", "promhttp.HandlerFor"} {
 		if !strings.Contains(metrics, expected) {
 			t.Fatalf("expected metrics file to contain %q", expected)
 		}
+	}
+	if strings.Contains(metrics, "promauto") {
+		t.Fatal("expected metrics collectors not to use the global Prometheus registry")
+	}
+
+	routesBytes, err := os.ReadFile(filepath.Join(outputDir, "internal", "server", "routes.go"))
+	if err != nil {
+		t.Fatalf("read routes file: %v", err)
+	}
+	if !strings.Contains(string(routesBytes), "otelhttp.NewMiddleware") {
+		t.Fatal("expected observability block to instrument HTTP requests")
 	}
 
 	for _, path := range []string{
@@ -295,7 +325,7 @@ func TestGenerateAllBlocks(t *testing.T) {
 	}
 
 	dockerfile := string(dockerfileBytes)
-	for _, expected := range []string{"HEALTHCHECK", "USER app", "go mod tidy"} {
+	for _, expected := range []string{"FROM golang:" + detectGoVersion() + "-alpine AS builder", "HEALTHCHECK", "USER app", "go mod tidy"} {
 		if !strings.Contains(dockerfile, expected) {
 			t.Fatalf("expected Dockerfile to contain %q", expected)
 		}
@@ -318,8 +348,16 @@ func buildGeneratedProject(t *testing.T, outputDir string) {
 	command := exec.Command("go", "build", "./...")
 	command.Dir = outputDir
 	command.Env = append(os.Environ(), "GOWORK=off")
-	output, err := command.CombinedOutput()
+	buildOutput, err := command.CombinedOutput()
 	if err != nil {
-		t.Fatalf("go build ./... failed: %v\n%s", err, string(output))
+		t.Fatalf("go build failed: %v\n%s", err, string(buildOutput))
+	}
+
+	testCommand := exec.Command("go", "test", "./...")
+	testCommand.Dir = outputDir
+	testCommand.Env = append(os.Environ(), "GOWORK=off")
+	testOutput, err := testCommand.CombinedOutput()
+	if err != nil {
+		t.Fatalf("go test failed: %v\n%s", err, string(testOutput))
 	}
 }
